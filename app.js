@@ -2,6 +2,13 @@ import readline from "node:readline";
 import chalk from "chalk";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import {
+  parsePriority,
+  isOverdue,
+  normalizeTasks,
+  sortByPriority as sortByPriorityLogic,
+  sortByStatus as sortByStatusLogic,
+} from "./todoLogic.js";
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -17,17 +24,8 @@ const loadTasks = async () => {
     try {
       const data = await readFile(DATA_FILE, "utf8");
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        // Normalize tasks to ensure priority and dueDate fields exist
-        todoList = parsed.map((item) => ({
-          description: String(item.description ?? ""),
-          completed: Boolean(item.completed),
-          priority: item.priority ?? "Medium",
-          dueDate: item.dueDate ?? null,
-        }));
-      } else {
-        todoList = [];
-      }
+      // Normalize tasks to ensure priority and dueDate fields exist
+      todoList = normalizeTasks(parsed);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : `Unknown error: ${String(err)}`;
@@ -95,18 +93,18 @@ const handleTaskDescription = (task) => {
 
 const handlePriorityInput = (description, priorityInput) => {
   const normalized = priorityInput.trim().toLowerCase();
-  let priority = "Medium";
-  if (normalized === "l" || normalized === "low") {
-    priority = "Low";
-  } else if (normalized === "h" || normalized === "high") {
-    priority = "High";
-  } else if (
-    normalized === "m" ||
-    normalized === "medium" ||
-    normalized === ""
+  const priority = parsePriority(priorityInput);
+
+  // Warn if the user entered an unrecognized value
+  if (
+    normalized !== "" &&
+    normalized !== "l" &&
+    normalized !== "low" &&
+    normalized !== "m" &&
+    normalized !== "medium" &&
+    normalized !== "h" &&
+    normalized !== "high"
   ) {
-    priority = "Medium";
-  } else {
     console.log(chalk.yellow("Unknown priority, defaulting to Medium."));
   }
 
@@ -158,25 +156,10 @@ const viewTasks = () => {
 
     let dueInfo = "";
     if (task.dueDate) {
-      const due = new Date(task.dueDate);
-      if (Number.isNaN(due.getTime())) {
-        dueInfo = " " + chalk.blue(`(Due: ${task.dueDate})`);
+      if (isOverdue(task)) {
+        dueInfo = " " + chalk.redBright("[OVERDUE]");
       } else {
-        const now = new Date();
-        // Compare dates by day only
-        const endOfDue = new Date(
-          due.getFullYear(),
-          due.getMonth(),
-          due.getDate(),
-          23,
-          59,
-          59,
-        );
-        if (!task.completed && now > endOfDue) {
-          dueInfo = " " + chalk.redBright("[OVERDUE]");
-        } else {
-          dueInfo = " " + chalk.blue(`(Due: ${task.dueDate})`);
-        }
+        dueInfo = " " + chalk.blue(`(Due: ${task.dueDate})`);
       }
     }
 
@@ -318,16 +301,7 @@ const sortByPriority = async () => {
     return;
   }
 
-  const order = { High: 0, Medium: 1, Low: 2 };
-  todoList.sort((a, b) => {
-    const pa = order[a.priority ?? "Medium"] ?? 1;
-    const pb = order[b.priority ?? "Medium"] ?? 1;
-    if (pa !== pb) return pa - pb;
-    // Pending before completed
-    if (a.completed !== b.completed)
-      return Number(a.completed) - Number(b.completed);
-    return a.description.localeCompare(b.description);
-  });
+  todoList = sortByPriorityLogic(todoList);
 
   await saveTasks();
   console.log(chalk.green("Tasks sorted by priority."));
@@ -341,17 +315,7 @@ const sortByStatus = async () => {
     return;
   }
 
-  todoList.sort((a, b) => {
-    // Pending (false) first, then completed (true)
-    if (a.completed !== b.completed)
-      return Number(a.completed) - Number(b.completed);
-    // Within same status, keep higher priority first
-    const order = { High: 0, Medium: 1, Low: 2 };
-    const pa = order[a.priority ?? "Medium"] ?? 1;
-    const pb = order[b.priority ?? "Medium"] ?? 1;
-    if (pa !== pb) return pa - pb;
-    return a.description.localeCompare(b.description);
-  });
+  todoList = sortByStatusLogic(todoList);
 
   await saveTasks();
   console.log(chalk.green("Tasks sorted by status (pending/completed)."));
