@@ -16,7 +16,18 @@ const loadTasks = async () => {
   if (existsSync(DATA_FILE)) {
     try {
       const data = await readFile(DATA_FILE, "utf8");
-      todoList = JSON.parse(data);
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        // Normalize tasks to ensure priority and dueDate fields exist
+        todoList = parsed.map((item) => ({
+          description: String(item.description ?? ""),
+          completed: Boolean(item.completed),
+          priority: item.priority ?? "Medium",
+          dueDate: item.dueDate ?? null,
+        }));
+      } else {
+        todoList = [];
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : `Unknown error: ${String(err)}`;
@@ -50,33 +61,79 @@ const showMenu = () => {
   console.log(chalk.yellow("4.") + " Edit a Task");
   console.log(chalk.yellow("5.") + " Remove a Task");
   console.log(chalk.yellow("6.") + " Clear All Tasks");
-  console.log(chalk.yellow("7.") + " Exit");
+  console.log(chalk.yellow("7.") + " Sort Tasks by Priority");
+  console.log(chalk.yellow("8.") + " Sort Tasks by Status (Pending/Completed)");
+  console.log(chalk.yellow("9.") + " Exit");
   console.log();
   rl.question(chalk.magenta("Please select an option: "), handleInput);
 };
 
-const addTask = () => {
-  const askForTask = () => {
-    rl.question(
-      chalk.magenta(
-        "Enter the task description (or press Enter with no text to stop): ",
-      ),
-      async (task) => {
-        if (task.trim().length === 0) {
-          // Stop adding and go back to menu
-          showMenu();
-          return;
-        }
-        todoList.push({ description: task, completed: false });
-        console.log(chalk.green("Task added."));
-        await saveTasks();
-        // Ask again for another task
-        askForTask();
-      },
-    );
-  };
+const promptForTaskDescription = () => {
+  rl.question(
+    chalk.magenta(
+      "Enter the task description (or press Enter with no text to stop): ",
+    ),
+    handleTaskDescription,
+  );
+};
 
-  askForTask();
+const handleTaskDescription = (task) => {
+  const trimmed = task.trim();
+  if (trimmed.length === 0) {
+    // Stop adding and go back to menu
+    showMenu();
+    return;
+  }
+
+  rl.question(
+    chalk.magenta(
+      "Set priority (L)ow, (M)edium, (H)igh. Press Enter for Medium: ",
+    ),
+    (priorityInput) => handlePriorityInput(trimmed, priorityInput),
+  );
+};
+
+const handlePriorityInput = (description, priorityInput) => {
+  const normalized = priorityInput.trim().toLowerCase();
+  let priority = "Medium";
+  if (normalized === "l" || normalized === "low") {
+    priority = "Low";
+  } else if (normalized === "h" || normalized === "high") {
+    priority = "High";
+  } else if (
+    normalized === "m" ||
+    normalized === "medium" ||
+    normalized === ""
+  ) {
+    priority = "Medium";
+  } else {
+    console.log(chalk.yellow("Unknown priority, defaulting to Medium."));
+  }
+
+  rl.question(
+    chalk.magenta("Enter due date (YYYY-MM-DD) or press Enter to skip: "),
+    (dueInput) => handleDueDateInput(description, priority, dueInput),
+  );
+};
+
+const handleDueDateInput = async (description, priority, dueInput) => {
+  const dueTrimmed = dueInput.trim();
+  const dueDate = dueTrimmed.length > 0 ? dueTrimmed : null;
+
+  todoList.push({
+    description,
+    completed: false,
+    priority,
+    dueDate,
+  });
+  console.log(chalk.green("Task added."));
+  await saveTasks();
+  // Ask again for another task
+  promptForTaskDescription();
+};
+
+const addTask = () => {
+  promptForTaskDescription();
 };
 
 const viewTasks = () => {
@@ -90,7 +147,40 @@ const viewTasks = () => {
     const status = task.completed
       ? chalk.greenBright("[✓]")
       : chalk.gray("[ ]");
-    const line = `${index + 1}. ${status} ${task.description}`;
+    let priorityLabel;
+    if (task.priority === "High") {
+      priorityLabel = chalk.redBright("(High)");
+    } else if (task.priority === "Low") {
+      priorityLabel = chalk.green("(Low)");
+    } else {
+      priorityLabel = chalk.yellow("(Medium)");
+    }
+
+    let dueInfo = "";
+    if (task.dueDate) {
+      const due = new Date(task.dueDate);
+      if (Number.isNaN(due.getTime())) {
+        dueInfo = " " + chalk.blue(`(Due: ${task.dueDate})`);
+      } else {
+        const now = new Date();
+        // Compare dates by day only
+        const endOfDue = new Date(
+          due.getFullYear(),
+          due.getMonth(),
+          due.getDate(),
+          23,
+          59,
+          59,
+        );
+        if (!task.completed && now > endOfDue) {
+          dueInfo = " " + chalk.redBright("[OVERDUE]");
+        } else {
+          dueInfo = " " + chalk.blue(`(Due: ${task.dueDate})`);
+        }
+      }
+    }
+
+    const line = `${index + 1}. ${status} ${priorityLabel} ${task.description} ${dueInfo}`;
     console.log(task.completed ? chalk.greenBright(line) : line);
   });
   showMenu();
@@ -221,6 +311,53 @@ const clearAllTasks = () => {
   );
 };
 
+const sortByPriority = async () => {
+  if (todoList.length === 0) {
+    console.log(chalk.yellow("No tasks to sort."));
+    showMenu();
+    return;
+  }
+
+  const order = { High: 0, Medium: 1, Low: 2 };
+  todoList.sort((a, b) => {
+    const pa = order[a.priority ?? "Medium"] ?? 1;
+    const pb = order[b.priority ?? "Medium"] ?? 1;
+    if (pa !== pb) return pa - pb;
+    // Pending before completed
+    if (a.completed !== b.completed)
+      return Number(a.completed) - Number(b.completed);
+    return a.description.localeCompare(b.description);
+  });
+
+  await saveTasks();
+  console.log(chalk.green("Tasks sorted by priority."));
+  showMenu();
+};
+
+const sortByStatus = async () => {
+  if (todoList.length === 0) {
+    console.log(chalk.yellow("No tasks to sort."));
+    showMenu();
+    return;
+  }
+
+  todoList.sort((a, b) => {
+    // Pending (false) first, then completed (true)
+    if (a.completed !== b.completed)
+      return Number(a.completed) - Number(b.completed);
+    // Within same status, keep higher priority first
+    const order = { High: 0, Medium: 1, Low: 2 };
+    const pa = order[a.priority ?? "Medium"] ?? 1;
+    const pb = order[b.priority ?? "Medium"] ?? 1;
+    if (pa !== pb) return pa - pb;
+    return a.description.localeCompare(b.description);
+  });
+
+  await saveTasks();
+  console.log(chalk.green("Tasks sorted by status (pending/completed)."));
+  showMenu();
+};
+
 const exitApp = () => {
   console.log(chalk.cyan("Exiting..."));
   rl.close();
@@ -252,6 +389,14 @@ const handleInput = (option) => {
       clearAllTasks();
       break;
     case "7":
+      // Sort by priority
+      sortByPriority();
+      break;
+    case "8":
+      // Sort by status
+      sortByStatus();
+      break;
+    case "9":
       exitApp();
       break;
     default:

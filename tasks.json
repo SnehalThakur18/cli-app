@@ -1,18 +1,26 @@
 [
   {
-    "description": "Buy groceries",
-    "completed": true
-  },
-  {
     "description": "Finish Node CLI mini project",
-    "completed": false
-  },
-  {
-    "description": "Read a chapter of a book",
-    "completed": true
+    "completed": false,
+    "priority": "High",
+    "dueDate": "2026-03-07"
   },
   {
     "description": "Write review on book",
-    "completed": false
+    "completed": false,
+    "priority": "Low",
+    "dueDate": null
+  },
+  {
+    "description": "Buy groceries",
+    "completed": true,
+    "priority": "High",
+    "dueDate": "2026-03-05"
+  },
+  {
+    "description": "Read a chapter of a book",
+    "completed": true,
+    "priority": "Medium",
+    "dueDate": "2026-03-10"
   }
 ]
