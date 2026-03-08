@@ -1,12 +1,46 @@
 import readline from "node:readline";
 import chalk from "chalk";
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
 });
 
-const todoList = [];
+const DATA_FILE = "tasks.json";
+let todoList = [];
+
+// Load tasks from file if it exists.
+const loadTasks = async () => {
+  if (existsSync(DATA_FILE)) {
+    try {
+      const data = await readFile(DATA_FILE, "utf8");
+      todoList = JSON.parse(data);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : `Unknown error: ${String(err)}`;
+      console.log(
+        chalk.red(
+          `Error loading tasks from ${DATA_FILE}: ${message}. Starting fresh.`,
+        ),
+      );
+      // Fall back to an empty list so the app can still run
+      todoList = [];
+    }
+  }
+};
+
+// Save tasks to file whenever they change
+const saveTasks = async () => {
+  try {
+    await writeFile(DATA_FILE, JSON.stringify(todoList, null, 2), "utf8");
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : `Unknown error: ${String(err)}`;
+    console.log(chalk.red(`Error saving tasks to ${DATA_FILE}: ${message}.`));
+  }
+};
 
 const showMenu = () => {
   console.log(chalk.cyanBright("\n==== TODO LIST APP ====\n"));
@@ -27,7 +61,7 @@ const addTask = () => {
       chalk.magenta(
         "Enter the task description (or press Enter with no text to stop): ",
       ),
-      (task) => {
+      async (task) => {
         if (task.trim().length === 0) {
           // Stop adding and go back to menu
           showMenu();
@@ -35,6 +69,7 @@ const addTask = () => {
         }
         todoList.push({ description: task, completed: false });
         console.log(chalk.green("Task added."));
+        await saveTasks();
         // Ask again for another task
         askForTask();
       },
@@ -73,7 +108,7 @@ const markTaskCompleted = () => {
       chalk.magenta(
         "Enter the task number to mark as completed (or press Enter with no text to stop): ",
       ),
-      (input) => {
+      async (input) => {
         const trimmed = input.trim();
         if (trimmed.length === 0) {
           // Stop marking and go back to menu
@@ -90,6 +125,7 @@ const markTaskCompleted = () => {
           } else {
             todoList[index].completed = true;
             console.log(chalk.green("Task marked as completed."));
+            await saveTasks();
           }
         } else {
           console.log(chalk.red("Invalid task number"));
@@ -119,7 +155,7 @@ const editTask = () => {
         chalk.magenta(
           `Current description: "${currentDescription}". Enter new description: `,
         ),
-        (newDescription) => {
+        async (newDescription) => {
           if (newDescription.trim().length === 0) {
             console.log(
               chalk.yellow("Description cannot be empty. Task not changed."),
@@ -127,6 +163,7 @@ const editTask = () => {
           } else {
             todoList[index].description = newDescription;
             console.log(chalk.green("Task updated successfully."));
+            await saveTasks();
           }
           showMenu();
         },
@@ -145,16 +182,20 @@ const removeTask = () => {
     return;
   }
 
-  rl.question(chalk.magenta("Enter the task number to remove: "), (number) => {
-    const index = Number.parseInt(number) - 1;
-    if (index >= 0 && index < todoList.length) {
-      todoList.splice(index, 1);
-      console.log(chalk.green("Task Removed Successfully"));
-    } else {
-      console.log(chalk.red("Invalid task number"));
-    }
-    showMenu();
-  });
+  rl.question(
+    chalk.magenta("Enter the task number to remove: "),
+    async (number) => {
+      const index = Number.parseInt(number) - 1;
+      if (index >= 0 && index < todoList.length) {
+        todoList.splice(index, 1);
+        console.log(chalk.green("Task Removed Successfully"));
+        await saveTasks();
+      } else {
+        console.log(chalk.red("Invalid task number"));
+      }
+      showMenu();
+    },
+  );
 };
 
 const clearAllTasks = () => {
@@ -166,11 +207,12 @@ const clearAllTasks = () => {
 
   rl.question(
     chalk.magenta("Are you sure you want to clear all tasks? (y/n): "),
-    (answer) => {
+    async (answer) => {
       const normalized = answer.trim().toLowerCase();
       if (normalized === "y" || normalized === "yes") {
         todoList.length = 0;
         console.log(chalk.green("All tasks cleared."));
+        await saveTasks();
       } else {
         console.log(chalk.yellow("No tasks were cleared."));
       }
@@ -217,4 +259,5 @@ const handleInput = (option) => {
   }
 };
 
+await loadTasks();
 showMenu();
